@@ -19,6 +19,9 @@
 #include <opencv2/dnn.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/opencv.hpp>
+#include <opencv2/tracking.hpp>
+#include <opencv2/core/ocl.hpp>
 
 using namespace cv;
 using namespace dnn;
@@ -31,40 +34,7 @@ int inpWidth = 416;  // DNN's Width input
 int inpHeight = 416; // DNN's Height input
 vector<string> classes;
 int detected = 0, tracked = 0;
-
-/*
- * Name:         drawPred
- * Purpose:      Draw the predicted bounding box
- * Arguments:    int classId, float conf, int left, int top, int right, int bottom, Mat& frame
- * Outputs:      none
- * Modifies:     frame
- * Returns:      none
- * Assumptions:  none
- * Bugs:         ?
- * Notes:        based on provided file object_detection_yolo.cpp
- */
-void 
-drawPred(int classId, float conf, int left, int top, int right, int bottom, Mat& frame)
-{
-    //Draw a rectangle displaying the bounding box
-    rectangle(frame, Point(left, top), Point(right, bottom), Scalar(255, 178, 50), 3);
-
-    //Get the label for the class name and its confidence
-    string label = format("%.2f", conf);
-    if (!classes.empty())
-    {
-        CV_Assert(classId < (int)classes.size());
-        label = classes[classId] + ":" + label;
-    }
-
-    //Display the label at the top of the bounding box
-    int baseLine;
-    Size labelSize = getTextSize(label, FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
-    top = max(top, labelSize.height);
-
-    rectangle(frame, Point(left, top - round(1.5*labelSize.height)), Point(left + round(1.5*labelSize.width), top + baseLine), Scalar(255, 255, 255), FILLED);
-    putText(frame, label, Point(left, top), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,0,0),1);
-}
+Rect2d bbox;
 
 /*
  * Name:         postprocess
@@ -123,9 +93,12 @@ postprocess(Mat& frame, const vector<Mat>& outs)
         Rect box = boxes[idx];
         if(classes[classIds[idx]] == "sports ball")
         {
-            //tracked = 1;
-            drawPred(classIds[idx], confidences[idx], box.x, box.y,
-                box.x + box.width, box.y + box.height, frame);
+            detected = 1;
+            bbox.x = box.x;
+            bbox.y = box.y;
+            bbox.width = box.width;
+            bbox.height = box.height;
+            rectangle(frame, Point(box.x, box.y), Point(box.x + box.width, box.y + box.height), Scalar(255, 0, 0), 3);
         }     
     }
 }
@@ -169,6 +142,12 @@ main(int argc, char * argv[])
     string classesFile = "./data/models/coco.names";
     ifstream ifs(classesFile.c_str());
     string line;
+    Ptr<Tracker> tracker;
+    Point text_position;
+
+    text_position.x = 30;
+    text_position.y = 30;
+
     while (getline(ifs, line)) classes.push_back(line);
 
     // Give the configuration and weight files for the model
@@ -203,9 +182,13 @@ main(int argc, char * argv[])
     // initialize video writer
     video.open(outputFile, VideoWriter::fourcc('M','J','P','G'), 28, Size(cap.get(CAP_PROP_FRAME_WIDTH), cap.get(CAP_PROP_FRAME_HEIGHT)));
 
+    // Create a tracker
+    //tracker = TrackerKCF::create();
+
     // Create a window
     static const string kWinName = "Detect and track soccer ball";
     namedWindow(kWinName, WINDOW_NORMAL);
+    resizeWindow(kWinName, 1280, 720);
 
     // Process frames.
     while (waitKey(1) < 0)
@@ -235,6 +218,36 @@ main(int argc, char * argv[])
 
             // Remove the bounding boxes with low confidence
             postprocess(frame, outs);
+            if (detected == 1)
+            {
+                putText(frame, "Detection success", text_position, FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,0,255),2);
+                tracker = TrackerKCF::create();
+                tracker->init(frame, bbox);
+                detected = 0;
+                tracked = 1;
+            }
+            else
+            {
+                putText(frame, "Detection/tracking failure", text_position, FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,0,255),2);
+                
+            }
+            
+        }
+        else if (detected == 0 && tracked == 1)
+        {
+            bool ok = tracker->update(frame, bbox);
+
+            if (ok)
+            {
+                putText(frame, "Tracking success", text_position, FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,0,255),2);
+                // Tracking success : Draw the tracked object
+                rectangle(frame, bbox, Scalar( 0, 255, 0 ), 2, 1 );
+            }
+            else
+            {
+                putText(frame, "Tracking failure", text_position, FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,0,255),2);
+                tracked = 0;
+            }      
         }
 
         // Write the frame with the detection boxes
