@@ -33,8 +33,9 @@ float nmsThreshold = 0.4;  // Non-maximum suppression threshold
 int inpWidth = 416;  // DNN's Width input
 int inpHeight = 416; // DNN's Height input
 vector<string> classes;
-int detected = 0, tracked = 0;
+int detected = 0, tracked = 0;  //determine whether to use detector or tracker
 Rect2d bbox;
+int frame_skip = 5;    //number of frames to skip when detecting (to speed up detection)
 
 /*
  * Name:         postprocess
@@ -144,9 +145,11 @@ main(int argc, char * argv[])
     string line;
     Ptr<Tracker> tracker;
     Point text_position;
+    int counter;
 
     text_position.x = 30;
     text_position.y = 30;
+    counter = 0;
 
     while (getline(ifs, line)) classes.push_back(line);
 
@@ -195,6 +198,7 @@ main(int argc, char * argv[])
     {
         // get frame from the video
         cap >> frame;
+        counter++;
 
         // Stop the program if reached end of video
         if (frame.empty()) {
@@ -204,7 +208,7 @@ main(int argc, char * argv[])
             break;
         }
 
-        if(detected == 0 && tracked == 0)
+        if(detected == 0 && tracked == 0 && counter % frame_skip == 0)
         {
             // Create a 4D blob from a frame.
             blobFromImage(frame, blob, 1/255.0, Size(inpWidth, inpHeight), Scalar(0,0,0), true, false);
@@ -225,13 +229,7 @@ main(int argc, char * argv[])
                 tracker->init(frame, bbox);
                 detected = 0;
                 tracked = 1;
-            }
-            else
-            {
-                putText(frame, "Detection/tracking failure", text_position, FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,0,255),2);
-                
-            }
-            
+            }        
         }
         else if (detected == 0 && tracked == 1)
         {
@@ -248,6 +246,11 @@ main(int argc, char * argv[])
                 putText(frame, "Tracking failure", text_position, FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,0,255),2);
                 tracked = 0;
             }      
+        }
+
+        if (detected == 0 && tracked == 0)
+        {
+            putText(frame, "Detection/tracking failure", text_position, FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,0,255),2);     
         }
 
         // Write the frame with the detection boxes
